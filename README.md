@@ -60,6 +60,7 @@ Open the URL shown in the terminal (usually http://localhost:8501).
   - Chat history rendered using `st.chat_message`
   - `st.chat_input` for live input
   - "Show raw request" expander displaying the exact payload (OpenAI) or prompt + parameters (Hugging Face)
+  - Knowledge Base: Upload a PDF in the sidebar under "Knowledge Base (PDF)". The app extracts text, chunks it, and retrieves top matching excerpts for each question, augmenting the system prompt. Use "Clear KB" to remove it.
 
 ## Pushing to GitHub
 
@@ -96,4 +97,3 @@ Notes:
 ├── .gitignore
 └── README.md
 ```
-
