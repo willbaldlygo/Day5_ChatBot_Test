@@ -8,7 +8,6 @@ import streamlit as st
 import requests
 from dotenv import load_dotenv
 from pypdf import PdfReader
-import time
 
 
 # --- Setup ---
@@ -73,38 +72,7 @@ def load_example_system_prompt() -> str:
 
 
 # --- Prompt formatting for HF instruct model ---
-def build_mistral_instruct_prompt(system_prompt: str, history: List[Dict[str, str]], new_user_message: str) -> str:
-    """Format conversation into a single prompt for Mistral-Instruct models.
-
-    History is a list of dicts [{role, content}] with roles in {"user", "assistant"}.
-    """
-    def sanitize(text: str) -> str:
-        return text.replace("</s>", "").strip()
-
-    sys_block = f"<<SYS>>\n{sanitize(system_prompt)}\n<</SYS>>\n\n"
-
-    prompt_parts: List[str] = []
-    prompt_parts.append(f"<s>[INST] {sys_block}")
-
-    # Iterate over history as pairs (user -> assistant)
-    i = 0
-    while i < len(history):
-        u = history[i]["content"] if history[i]["role"] == "user" else ""
-        a = ""
-        if i + 1 < len(history) and history[i + 1]["role"] == "assistant":
-            a = history[i + 1]["content"]
-            i += 2
-        else:
-            i += 1
-        u = sanitize(u)
-        a = sanitize(a)
-        if u:
-            prompt_parts.append(f"{u} [/INST]\n{a} </s>\n<s>[INST] ")
-
-    # Final incoming user message
-    prompt_parts.append(f"{sanitize(new_user_message)} [/INST]")
-
-    return "".join(prompt_parts)
+ 
 
 
 # --- Knowledge base helpers ---
@@ -245,94 +213,7 @@ def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional
         return None, f"OpenAI error: {e}"
 
 
-def call_huggingface(system_prompt: str, history: List[Dict[str, str]], new_user_message: str) -> Tuple[Optional[str], Optional[str]]:
-    """Call Hugging Face Inference API for Mistral-7B-Instruct-v0.3.
-
-    Returns (assistant_text, error_message).
-    Stores raw request (prompt + params) for display.
-    """
-    api_key = os.getenv("HF_API_KEY")
-    if not api_key:
-        return None, "Missing HF_API_KEY. Set it in your environment or .env."
-
-    model_id = "mistralai/Mistral-7B-Instruct-v0.3"
-    url = f"https://api-inference.huggingface.co/models/{model_id}"
-
-    prompt = build_mistral_instruct_prompt(system_prompt, history, new_user_message)
-    params = {
-        "max_new_tokens": 256,
-        "temperature": 0.3,
-        "top_p": 0.95,
-        "do_sample": True,
-        "return_full_text": False,
-    }
-    payload = {"inputs": prompt, "parameters": params, "options": {"wait_for_model": True}}
-
-    # Store raw request snapshot
-    st.session_state["raw_request"] = {
-        "provider": "huggingface",
-        "model": model_id,
-        "prompt": prompt,
-        "parameters": params,
-    }
-
-    try:
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-
-        # Poll on 503/model loading up to ~180s
-        deadline = time.time() + 180
-        attempt = 0
-        while True:
-            attempt += 1
-            resp = requests.post(url, headers=headers, json=payload, timeout=120)
-            # Handle non-OK statuses
-            if resp.status_code == 503:
-                # Model loading / warming up
-                try:
-                    info = resp.json()
-                except Exception:
-                    info = {"error": resp.text}
-                est = float(info.get("estimated_time", 5.0)) if isinstance(info, dict) else 5.0
-                if time.time() + est > deadline:
-                    return None, f"HF API model still loading after multiple attempts: {info}"
-                # brief wait then retry
-                time.sleep(min(max(est, 2.0), 10.0))
-                continue
-            if resp.status_code != 200:
-                return None, f"HF API error {resp.status_code}: {resp.text}"
-
-            # Parse successful response
-            try:
-                data = resp.json()
-            except Exception as e:
-                return None, f"HF API invalid JSON: {e}"
-
-            # Supported shapes:
-            # - list[{generated_text: str}]
-            # - {generated_text: str}
-            # - plain string
-            if isinstance(data, list) and data:
-                first = data[0]
-                if isinstance(first, dict) and "generated_text" in first:
-                    gen = first.get("generated_text")
-                    if isinstance(gen, str) and gen.strip():
-                        return gen.strip(), None
-            if isinstance(data, dict):
-                if "generated_text" in data and isinstance(data["generated_text"], str):
-                    gen = data["generated_text"].strip()
-                    if gen:
-                        return gen, None
-                if data.get("error"):
-                    return None, f"HF API error: {data.get('error')}"
-            if isinstance(data, str) and data.strip():
-                return data.strip(), None
-            return None, "Empty response from Hugging Face Inference API."
-    except Exception as e:
-        return None, f"Hugging Face error: {e}"
+ 
 
 
 def call_groq(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:

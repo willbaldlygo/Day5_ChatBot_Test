@@ -30,14 +30,14 @@ Copy `.env.example` to `.env` and add your keys, or export them directly in your
 cp .env.example .env
 # Then edit .env to add your keys
 # OPENAI_API_KEY=...
-# HF_API_KEY=...
+# GROQ_API_KEY=...
 ```
 
 Alternatively, export in your shell session:
 
 ```bash
 export OPENAI_API_KEY=your_openai_key
-export HF_API_KEY=your_hf_key
+export GROQ_API_KEY=your_groq_key
 ```
 
 4) Run the app
@@ -58,7 +58,7 @@ Open the URL shown in the terminal (usually http://localhost:8501).
 - Main area:
   - Chat history rendered using `st.chat_message`
   - `st.chat_input` for live input
-  - "Show raw request" expander displaying the exact payload (OpenAI) or prompt + parameters (Hugging Face)
+  - "Show raw request" expander displaying the exact payload (OpenAI or Groq)
   - Knowledge Base: Upload a PDF in the sidebar under "Knowledge Base (PDF)". The app extracts text, chunks it, and retrieves top matching excerpts for each question, augmenting the system prompt. Use "Clear KB" to remove it.
 
 ## Pushing to GitHub
@@ -78,13 +78,11 @@ git push -u origin main
 
 1) Create a new Space (Streamlit) and push your repo files there.
 2) In the Space Settings, add the following Secrets:
-   - `OPENAI_API_KEY`
-   - `HF_API_KEY` (optional; not required if only using OpenAI/Groq)
+   - `OPENAI_API_KEY` (if using OpenAI backend)
    - `GROQ_API_KEY` (for Groq backend)
 3) The app reads these from the environment automatically.
 
 Notes:
-- The Hugging Face Inference API may cold-start a model on first request; the app waits for the model when calling.
 - Errors and missing keys are surfaced in-app via warnings/errors.
 
 ## Project Structure
