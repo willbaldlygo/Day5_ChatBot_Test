@@ -54,7 +54,7 @@ Open the URL shown in the terminal (usually http://localhost:8501).
   - Model selector: `OpenAI: gpt-3.5-turbo` or `HuggingFace: mistralai/Mistral-7B-Instruct-v0.2`
   - Editable System Prompt text area
   - Reset Conversation (clears history, keeps system prompt)
-  - Load Example Prompt (empathetic, policy-aware customer service template)
+- Load Example Prompt (empathetic, policy-aware customer service template). The example prompt is pre-filled by default on first launch; you can edit or clear it anytime.
 - Main area:
   - Chat history rendered using `st.chat_message`
   - `st.chat_input` for live input

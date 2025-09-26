@@ -49,7 +49,8 @@ def ensure_session_state():
     if "messages" not in st.session_state:
         st.session_state["messages"] = []  # list of {role, content}
     if "system_prompt" not in st.session_state:
-        st.session_state["system_prompt"] = ""
+        # Initialize with example prompt; users can edit/delete freely
+        st.session_state["system_prompt"] = load_example_system_prompt()
     if "model_choice" not in st.session_state:
         st.session_state["model_choice"] = "OpenAI: gpt-3.5-turbo"
     if "raw_request" not in st.session_state:
@@ -326,9 +327,7 @@ def sidebar():
             if st.button("Load Example Prompt", use_container_width=True):
                 st.session_state["system_prompt"] = load_example_system_prompt()
 
-        # Test inputs
-        with st.expander("Test Inputs"):
-            st.caption("No test inputs configured.")
+        # (Former Test Inputs removed)
 
         # Knowledge base uploader
         with st.expander("Knowledge Base (PDF)", expanded=False):
