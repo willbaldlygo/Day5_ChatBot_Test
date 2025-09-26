@@ -434,7 +434,10 @@ def main():
             st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
         # Re-render updated conversation
-        st.experimental_rerun()
+        if hasattr(st, "rerun"):
+            st.rerun()
+        else:
+            st.experimental_rerun()
 
     # Raw request viewer
     with st.expander("Show raw request"):
