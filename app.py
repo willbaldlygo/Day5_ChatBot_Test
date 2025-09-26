@@ -8,6 +8,7 @@ import streamlit as st
 import requests
 from dotenv import load_dotenv
 from pypdf import PdfReader
+import time
 
 
 # --- Setup ---
@@ -276,20 +277,60 @@ def call_huggingface(system_prompt: str, history: List[Dict[str, str]], new_user
     }
 
     try:
-        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        if resp.status_code != 200:
-            return None, f"HF API error {resp.status_code}: {resp.text}"
-        data = resp.json()
-        # Expected: a list with an object containing 'generated_text'
-        if isinstance(data, list) and data:
-            gen = data[0].get("generated_text")
-            if gen and isinstance(gen, str) and gen.strip():
-                return gen.strip(), None
-        # Some backends return dict with 'error'
-        if isinstance(data, dict) and data.get("error"):
-            return None, f"HF API error: {data.get('error')}"
-        return None, "Empty response from Hugging Face Inference API."
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+        # Poll on 503/model loading up to ~180s
+        deadline = time.time() + 180
+        attempt = 0
+        while True:
+            attempt += 1
+            resp = requests.post(url, headers=headers, json=payload, timeout=120)
+            # Handle non-OK statuses
+            if resp.status_code == 503:
+                # Model loading / warming up
+                try:
+                    info = resp.json()
+                except Exception:
+                    info = {"error": resp.text}
+                est = float(info.get("estimated_time", 5.0)) if isinstance(info, dict) else 5.0
+                if time.time() + est > deadline:
+                    return None, f"HF API model still loading after multiple attempts: {info}"
+                # brief wait then retry
+                time.sleep(min(max(est, 2.0), 10.0))
+                continue
+            if resp.status_code != 200:
+                return None, f"HF API error {resp.status_code}: {resp.text}"
+
+            # Parse successful response
+            try:
+                data = resp.json()
+            except Exception as e:
+                return None, f"HF API invalid JSON: {e}"
+
+            # Supported shapes:
+            # - list[{generated_text: str}]
+            # - {generated_text: str}
+            # - plain string
+            if isinstance(data, list) and data:
+                first = data[0]
+                if isinstance(first, dict) and "generated_text" in first:
+                    gen = first.get("generated_text")
+                    if isinstance(gen, str) and gen.strip():
+                        return gen.strip(), None
+            if isinstance(data, dict):
+                if "generated_text" in data and isinstance(data["generated_text"], str):
+                    gen = data["generated_text"].strip()
+                    if gen:
+                        return gen, None
+                if data.get("error"):
+                    return None, f"HF API error: {data.get('error')}"
+            if isinstance(data, str) and data.strip():
+                return data.strip(), None
+            return None, "Empty response from Hugging Face Inference API."
     except Exception as e:
         return None, f"Hugging Face error: {e}"
 
