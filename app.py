@@ -13,7 +13,7 @@ from pypdf import PdfReader
 # --- Setup ---
 load_dotenv()
 
-APP_TITLE = "Customer Service Chatbot Sandbox"
+APP_TITLE = "Digital Peninsula: ChatBot Sandbox"
 
 
 # --- Utilities ---

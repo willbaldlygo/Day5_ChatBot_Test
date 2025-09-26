@@ -1,4 +1,4 @@
-# Customer Service Chatbot Sandbox
+# Digital Peninsula: ChatBot Sandbox
 
 An interactive Streamlit app to prototype and test customer service chatbot prompts against two backends:
 
@@ -68,7 +68,7 @@ Initialize a repo and push to GitHub:
 ```bash
 git init
 git add .
-git commit -m "Add Customer Service Chatbot Sandbox"
+git commit -m "Add Digital Peninsula: ChatBot Sandbox"
 git branch -M main
 git remote add origin https://github.com/<your-username>/<your-repo>.git
 git push -u origin main
