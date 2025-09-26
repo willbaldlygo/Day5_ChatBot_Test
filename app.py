@@ -368,6 +368,13 @@ def sidebar():
             if st.button("Load Example Prompt", use_container_width=True):
                 st.session_state["system_prompt"] = load_example_system_prompt()
 
+        # API key status
+        st.subheader("API Keys")
+        openai_ok = bool(os.getenv("OPENAI_API_KEY"))
+        hf_ok = bool(os.getenv("HF_API_KEY"))
+        st.caption(f"OpenAI: {'✅ set' if openai_ok else '⚠️ missing'}")
+        st.caption(f"Hugging Face: {'✅ set' if hf_ok else '⚠️ missing'}")
+
         # (Former Test Inputs removed)
 
         # Knowledge base uploader
@@ -404,6 +411,31 @@ def sidebar():
                 st.caption("The most relevant excerpts will be provided to the model with your question.")
             else:
                 st.info("No knowledge base loaded.")
+
+        # Debug tools
+        with st.expander("Debug", expanded=False):
+            if st.button("Test Hugging Face Connectivity"):
+                api_key = os.getenv("HF_API_KEY")
+                if not api_key:
+                    st.error("HF_API_KEY is missing. Add it to your environment or Secrets.")
+                else:
+                    model_id = "mistralai/Mistral-7B-Instruct-v0.3"
+                    url = f"https://api-inference.huggingface.co/models/{model_id}"
+                    prompt = "<s>[INST] <<SYS>> Connectivity test <</SYS>> Say 'hello' in one word. [/INST]"
+                    payload = {"inputs": prompt, "parameters": {"max_new_tokens": 4, "temperature": 0.1}, "options": {"wait_for_model": True}}
+                    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json", "Content-Type": "application/json"}
+                    try:
+                        r = requests.post(url, headers=headers, json=payload, timeout=60)
+                        if r.status_code != 200:
+                            st.error(f"HF API error {r.status_code}: {r.text[:500]}")
+                        else:
+                            st.success("HF connectivity OK")
+                            try:
+                                st.json(r.json())
+                            except Exception:
+                                st.write(r.text)
+                    except Exception as e:
+                        st.error(f"HF connectivity test failed: {e}")
 
 
 def render_chat():
