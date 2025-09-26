@@ -246,7 +246,7 @@ def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional
 
 
 def call_huggingface(system_prompt: str, history: List[Dict[str, str]], new_user_message: str) -> Tuple[Optional[str], Optional[str]]:
-    """Call Hugging Face Inference API for Mistral-7B-Instruct-v0.2.
+    """Call Hugging Face Inference API for Mistral-7B-Instruct-v0.3.
 
     Returns (assistant_text, error_message).
     Stores raw request (prompt + params) for display.
@@ -255,7 +255,7 @@ def call_huggingface(system_prompt: str, history: List[Dict[str, str]], new_user
     if not api_key:
         return None, "Missing HF_API_KEY. Set it in your environment or .env."
 
-    model_id = "mistralai/Mistral-7B-Instruct-v0.2"
+    model_id = "mistralai/Mistral-7B-Instruct-v0.3"
     url = f"https://api-inference.huggingface.co/models/{model_id}"
 
     prompt = build_mistral_instruct_prompt(system_prompt, history, new_user_message)
@@ -345,7 +345,7 @@ def sidebar():
             "Model",
             [
                 "OpenAI: gpt-3.5-turbo",
-                "HuggingFace: mistralai/Mistral-7B-Instruct-v0.2",
+                "HuggingFace: mistralai/Mistral-7B-Instruct-v0.3",
             ],
             index=0 if st.session_state["model_choice"].startswith("OpenAI") else 1,
         )
