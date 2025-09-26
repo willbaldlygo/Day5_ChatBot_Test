@@ -335,6 +335,52 @@ def call_huggingface(system_prompt: str, history: List[Dict[str, str]], new_user
         return None, f"Hugging Face error: {e}"
 
 
+def call_groq(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
+    """Call Groq Chat Completions API for gemma2-9b-it.
+
+    Returns (assistant_text, error_message). Also stores raw request in session state.
+    """
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return None, "Missing GROQ_API_KEY. Set it in your environment or .env."
+
+    model = "gemma2-9b-it"
+    temperature = 0.3
+    max_tokens = 512
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    st.session_state["raw_request"] = {"provider": "groq", "payload": payload}
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        if resp.status_code != 200:
+            return None, f"Groq API error {resp.status_code}: {resp.text}"
+        data = resp.json()
+        text = None
+        if isinstance(data, dict) and data.get("choices"):
+            choice = data["choices"][0]
+            # OpenAI-compatible shape
+            msg = choice.get("message") if isinstance(choice, dict) else None
+            if msg and isinstance(msg.get("content"), str):
+                text = msg["content"]
+        if not text or not text.strip():
+            return None, "Empty response from Groq."
+        return text.strip(), None
+    except Exception as e:
+        return None, f"Groq error: {e}"
+
+
 # --- UI ---
 def sidebar():
     with st.sidebar:
@@ -345,7 +391,7 @@ def sidebar():
             "Model",
             [
                 "OpenAI: gpt-3.5-turbo",
-                "HuggingFace: mistralai/Mistral-7B-Instruct-v0.3",
+                "Groq: gemma2-9b-it",
             ],
             index=0 if st.session_state["model_choice"].startswith("OpenAI") else 1,
         )
@@ -371,9 +417,9 @@ def sidebar():
         # API key status
         st.subheader("API Keys")
         openai_ok = bool(os.getenv("OPENAI_API_KEY"))
-        hf_ok = bool(os.getenv("HF_API_KEY"))
+        groq_ok = bool(os.getenv("GROQ_API_KEY"))
         st.caption(f"OpenAI: {'✅ set' if openai_ok else '⚠️ missing'}")
-        st.caption(f"Hugging Face: {'✅ set' if hf_ok else '⚠️ missing'}")
+        st.caption(f"Groq: {'✅ set' if groq_ok else '⚠️ missing'}")
 
         # (Former Test Inputs removed)
 
@@ -414,28 +460,34 @@ def sidebar():
 
         # Debug tools
         with st.expander("Debug", expanded=False):
-            if st.button("Test Hugging Face Connectivity"):
-                api_key = os.getenv("HF_API_KEY")
+            if st.button("Test Groq Connectivity"):
+                api_key = os.getenv("GROQ_API_KEY")
                 if not api_key:
-                    st.error("HF_API_KEY is missing. Add it to your environment or Secrets.")
+                    st.error("GROQ_API_KEY is missing. Add it to your environment or Secrets.")
                 else:
-                    model_id = "mistralai/Mistral-7B-Instruct-v0.3"
-                    url = f"https://api-inference.huggingface.co/models/{model_id}"
-                    prompt = "<s>[INST] <<SYS>> Connectivity test <</SYS>> Say 'hello' in one word. [/INST]"
-                    payload = {"inputs": prompt, "parameters": {"max_new_tokens": 4, "temperature": 0.1}, "options": {"wait_for_model": True}}
-                    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json", "Content-Type": "application/json"}
+                    url = "https://api.groq.com/openai/v1/chat/completions"
+                    payload = {
+                        "model": "gemma2-9b-it",
+                        "messages": [
+                            {"role": "system", "content": "Connectivity test"},
+                            {"role": "user", "content": "Say 'hello'"},
+                        ],
+                        "max_tokens": 4,
+                        "temperature": 0.1,
+                    }
+                    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"}
                     try:
                         r = requests.post(url, headers=headers, json=payload, timeout=60)
                         if r.status_code != 200:
-                            st.error(f"HF API error {r.status_code}: {r.text[:500]}")
+                            st.error(f"Groq API error {r.status_code}: {r.text[:500]}")
                         else:
-                            st.success("HF connectivity OK")
+                            st.success("Groq connectivity OK")
                             try:
                                 st.json(r.json())
                             except Exception:
                                 st.write(r.text)
                     except Exception as e:
-                        st.error(f"HF connectivity test failed: {e}")
+                        st.error(f"Groq connectivity test failed: {e}")
 
 
 def render_chat():
@@ -495,11 +547,10 @@ def main():
                 assistant_text, error = call_openai(api_messages)
 
         else:
-            # For HF build prompt from history except the last user msg
-            history = st.session_state["messages"][:-1]
-            new_user = st.session_state["messages"][-1]["content"]
-            with st.spinner("Calling Hugging Face…"):
-                assistant_text, error = call_huggingface(effective_system_prompt, history, new_user)
+            # Groq uses OpenAI-compatible chat API
+            api_messages = [{"role": "system", "content": effective_system_prompt}] + st.session_state["messages"]
+            with st.spinner("Calling Groq…"):
+                assistant_text, error = call_groq(api_messages)
 
         if error:
             st.error(error)
@@ -522,13 +573,9 @@ def main():
             if provider == "openai":
                 st.caption("OpenAI Chat Completions payload")
                 st.json(raw.get("payload"))
-            elif provider == "huggingface":
-                st.caption("Hugging Face Inference request")
-                st.write("Model:", raw.get("model"))
-                st.write("Parameters:")
-                st.json(raw.get("parameters"))
-                st.write("Prompt:")
-                st.code(raw.get("prompt", ""))
+            elif provider == "groq":
+                st.caption("Groq Chat Completions payload")
+                st.json(raw.get("payload"))
             else:
                 st.json(raw)
 
