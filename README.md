@@ -5,7 +5,7 @@ An interactive Streamlit app to prototype and test customer service chatbot prom
 - OpenAI Chat Completions (`gpt-3.5-turbo`)
 - Hugging Face Inference API (Mistral: `mistralai/Mistral-7B-Instruct-v0.2`)
 
-The app provides a sidebar for model selection, a live-editable system prompt, reset and example buttons, quick test inputs, chat history rendering, and a raw request viewer.
+The app provides a sidebar for model selection, a live-editable system prompt, reset and example buttons, chat history rendering, and a raw request viewer.
 
 ## Quick Start
 
@@ -55,7 +55,6 @@ Open the URL shown in the terminal (usually http://localhost:8501).
   - Editable System Prompt text area
   - Reset Conversation (clears history, keeps system prompt)
   - Load Example Prompt (empathetic, policy-aware customer service template)
-  - Test Inputs expander with 3 canned messages
 - Main area:
   - Chat history rendered using `st.chat_message`
   - `st.chat_input` for live input

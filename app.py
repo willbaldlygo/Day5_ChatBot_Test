@@ -328,12 +328,7 @@ def sidebar():
 
         # Test inputs
         with st.expander("Test Inputs"):
-            if st.button("I need a refund but I don’t have my order number."):
-                st.session_state["canned_input"] = "I need a refund but I don’t have my order number."
-            if st.button("This is ridiculous! My package is late again."):
-                st.session_state["canned_input"] = "This is ridiculous! My package is late again."
-            if st.button("Hi, what are your standard shipping times?"):
-                st.session_state["canned_input"] = "Hi, what are your standard shipping times?"
+            st.caption("No test inputs configured.")
 
         # Knowledge base uploader
         with st.expander("Knowledge Base (PDF)", expanded=False):
@@ -391,15 +386,10 @@ def main():
     st.title(APP_TITLE)
     sidebar()
 
-    # Pull any canned input set by sidebar buttons
-    canned = st.session_state.pop("canned_input", None)
-
     render_chat()
 
     # Chat input
     user_input = st.chat_input("Type your message…") if hasattr(st, "chat_input") else st.text_input("Your message")
-    if canned and not user_input:
-        user_input = canned
 
     # Handle sending
     if user_input:
