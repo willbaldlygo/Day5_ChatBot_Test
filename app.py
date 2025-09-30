@@ -62,8 +62,7 @@ def ensure_session_state():
 def load_example_system_prompt() -> str:
     return (
         "You are a helpful AI assistant. Your job is to answer questions as clearly "
-        "and accurately as you can based on your training data. Keep your tone "
-        "friendly, but professional."
+        "and accurately as you can. Keep your tone friendly, but professional."
     )
 
 
