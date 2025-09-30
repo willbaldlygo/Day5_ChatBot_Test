@@ -52,7 +52,7 @@ def ensure_session_state():
         # Initialize with example prompt; users can edit/delete freely
         st.session_state["system_prompt"] = load_example_system_prompt()
     if "model_choice" not in st.session_state:
-        st.session_state["model_choice"] = "OpenAI: gpt-3.5-turbo"
+        st.session_state["model_choice"] = "Groq: gemma2-9b-it"
     if "raw_request" not in st.session_state:
         st.session_state["raw_request"] = None
     if "kb" not in st.session_state:
@@ -263,13 +263,16 @@ def sidebar():
         st.header("Settings")
 
         # Model selector
+        model_options = [
+            "Groq: gemma2-9b-it",
+            "OpenAI: gpt-3.5-turbo",
+        ]
+        current_choice = st.session_state.get("model_choice", model_options[0])
+        default_index = 0 if current_choice.startswith("Groq") else 1
         model = st.selectbox(
             "Model",
-            [
-                "OpenAI: gpt-3.5-turbo",
-                "Groq: gemma2-9b-it",
-            ],
-            index=0 if st.session_state["model_choice"].startswith("OpenAI") else 1,
+            model_options,
+            index=default_index,
         )
         st.session_state["model_choice"] = model
 

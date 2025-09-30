@@ -51,7 +51,7 @@ Open the URL shown in the terminal (usually http://localhost:8501).
 ## Features
 
 - Sidebar controls:
-  - Model selector: `OpenAI: gpt-3.5-turbo` or `Groq: gemma2-9b-it`
+  - Model selector: `Groq: gemma2-9b-it` (default) or `OpenAI: gpt-3.5-turbo`
   - Editable System Prompt text area
   - Reset Conversation (clears history, keeps system prompt)
   - Load Example Prompt (friendly, professional helper template). The example prompt is pre-filled by default on first launch; you can edit or clear it anytime.
