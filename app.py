@@ -61,13 +61,9 @@ def ensure_session_state():
 
 def load_example_system_prompt() -> str:
     return (
-        "You are an empathetic, policy-aware customer service assistant.\n"
-        "- Always greet the customer warmly and acknowledge their feelings.\n"
-        "- If asking for account/order details, explain why and provide alternatives.\n"
-        "- Follow refund and replacement policies; never promise exceptions without guidance.\n"
-        "- Offer clear next steps and set expectations for timelines.\n"
-        "- Keep responses concise, friendly, and solution-focused.\n"
-        "- De-escalate tense situations respectfully and avoid blame.\n"
+        "You are a helpful AI assistant. Your job is to answer questions as clearly "
+        "and accurately as you can based on your training data. Keep your tone "
+        "friendly, but professional."
     )
 
 
