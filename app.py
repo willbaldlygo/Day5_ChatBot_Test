@@ -51,18 +51,16 @@ def ensure_session_state():
     if "system_prompt" not in st.session_state:
         # Initialize with example prompt; users can edit/delete freely
         st.session_state["system_prompt"] = load_example_system_prompt()
+    if "hf_model_id" not in st.session_state:
+        # Default HF model (editable in the sidebar)
+        st.session_state["hf_model_id"] = "mistralai/Mistral-7B-Instruct-v0.2"
     if "model_choice" not in st.session_state:
-        # Supported Groq default; you can switch to HF in the sidebar
-        st.session_state["model_choice"] = "Groq: llama-3.1-8b-instant"
+        # Only two providers: OpenAI GPT-3.5 and the HF repo you set above
+        st.session_state["model_choice"] = "OpenAI: gpt-3.5-turbo"
     if "raw_request" not in st.session_state:
         st.session_state["raw_request"] = None
     if "kb" not in st.session_state:
         st.session_state["kb"] = None  # dict with {text, chunks, pages, filename}
-    if "hf_model_id" not in st.session_state:
-        # Default HF model (you can edit in the sidebar)
-        st.session_state["hf_model_id"] = "mistralai/Mistral-7B-Instruct-v0.2"
-    if "speculative_mode" not in st.session_state:
-        st.session_state["speculative_mode"] = False
 
 
 def load_example_system_prompt() -> str:
@@ -156,42 +154,9 @@ def retrieve_relevant_chunks(query: str, chunks: List[str], k: int = 3) -> List[
     return [c for _, c in scored[:k]]
 
 
-# --- Groq helpers: live model list + label formatting ---
-@st.cache_data(ttl=600)
-def fetch_groq_models() -> List[str]:
-    """Return list of Groq model IDs from the live /models endpoint, or [] on failure."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return []
-    try:
-        r = requests.get(
-            "https://api.groq.com/openai/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10,
-        )
-        r.raise_for_status()
-        data = r.json() or {}
-        items = data.get("data", [])
-        ids = [m.get("id", "") for m in items if isinstance(m, dict)]
-        # Prefer stable options first if present
-        preferred_order = [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-        ]
-        ordered = [m for m in preferred_order if m in ids] + sorted([m for m in ids if m not in preferred_order])
-        return ordered
-    except Exception:
-        return []
-
-
-def label_for_groq(model_id: str) -> str:
-    return f"Groq: {model_id}"
-
-
+# --- Provider parsing ---
 def parse_model_choice(choice: str) -> Tuple[str, str]:
     """Return (provider, model_id) from a selectbox label."""
-    if choice.startswith("Groq: "):
-        return "groq", choice.split("Groq: ", 1)[1]
     if choice.startswith("OpenAI: "):
         return "openai", choice.split("OpenAI: ", 1)[1]
     if choice.startswith("HuggingFace: "):
@@ -206,7 +171,7 @@ def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional
     Returns (assistant_text, error_message). One will be None.
     Also stores raw request payload in session_state for debugging.
     """
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
     if not api_key:
         return None, "Missing OPENAI_API_KEY. Set it in your environment or .env."
 
@@ -253,52 +218,6 @@ def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional
         return None, f"OpenAI error: {e}"
 
 
-def call_groq(messages: List[Dict[str, str]], model_id: str) -> Tuple[Optional[str], Optional[str]]:
-    """Call Groq Chat Completions API for the given model_id.
-
-    Returns (assistant_text, error_message). Also stores raw request in session state.
-    """
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return None, "Missing GROQ_API_KEY. Set it in your environment or .env."
-
-    temperature = 0.3
-    max_tokens = 512
-
-    payload = {
-        "model": model_id,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    st.session_state["raw_request"] = {"provider": "groq", "payload": payload}
-
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        if resp.status_code != 200:
-            return None, f"Groq API error {resp.status_code}: {resp.text}"
-        data = resp.json()
-        text = None
-        if isinstance(data, dict) and data.get("choices"):
-            choice = data["choices"][0]
-            msg = choice.get("message") if isinstance(choice, dict) else None
-            if msg and isinstance(msg.get("content"), str):
-                text = msg["content"]
-        if not text or not text.strip():
-            return None, "Empty response from Groq. (Model may be unavailable or deprecated.)"
-        return text.strip(), None
-    except requests.Timeout:
-        return None, "Groq error: request timed out. Try a different model or reduce max_tokens."
-    except Exception as e:
-        return None, f"Groq error: {e}"
-
-
 def call_hf_inference(messages: List[Dict[str, str]], model_id: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Hugging Face Inference API backend (text-generation).
@@ -332,7 +251,7 @@ def call_hf_inference(messages: List[Dict[str, str]], model_id: str) -> Tuple[Op
         "inputs": prompt,
         "parameters": {
             "max_new_tokens": 512,
-            "temperature": 0.9,          # a bit higher to encourage “confident improv”
+            "temperature": 0.7,
             "top_p": 0.95,
             "repetition_penalty": 1.05,
             "return_full_text": False
@@ -370,11 +289,6 @@ def sidebar():
     with st.sidebar:
         st.header("Settings")
 
-        # --- Dynamic Groq model list (falls back if API/key missing) ---
-        groq_models = fetch_groq_models()
-        groq_default = "llama-3.1-8b-instant"
-        groq_labels = [label_for_groq(m) for m in groq_models] if groq_models else [label_for_groq(groq_default)]
-
         # --- Hugging Face model entry (free text so you can use any HF model ID) ---
         st.subheader("Hugging Face")
         hf_model_id = st.text_input(
@@ -382,15 +296,13 @@ def sidebar():
             value=st.session_state.get("hf_model_id", "mistralai/Mistral-7B-Instruct-v0.2"),
             help="Examples: mistralai/Mistral-7B-Instruct-v0.2, mistralai/Mixtral-8x7B-Instruct-v0.1",
         )
-        # Persist selection
         st.session_state["hf_model_id"] = hf_model_id.strip()
 
-        # --- Model selector (Groq, OpenAI, and HF) ---
-        model_options = (
-            groq_labels
-            + ["OpenAI: gpt-3.5-turbo"]
-            + [f"HuggingFace: {st.session_state['hf_model_id']}"]
-        )
+        # --- Model selector (ONLY OpenAI + HF) ---
+        model_options = [
+            "OpenAI: gpt-3.5-turbo",
+            f"HuggingFace: {st.session_state['hf_model_id']}" if st.session_state['hf_model_id'] else "HuggingFace: <set model above>",
+        ]
         current_choice = st.session_state.get("model_choice", model_options[0])
         if current_choice not in model_options:
             current_choice = model_options[0]
@@ -400,17 +312,9 @@ def sidebar():
             "Model",
             model_options,
             index=default_index,
-            help="Groq list comes from the live /models endpoint. Hugging Face uses the repo you typed above.",
+            help="Choose between OpenAI GPT-3.5 and the Hugging Face repo you set above.",
         )
         st.session_state["model_choice"] = model
-
-        # Speculative mode toggle (lets models improvise beyond their cutoffs)
-        st.checkbox(
-            "Speculative Mode (improvise confidently)",
-            value=st.session_state.get("speculative_mode", False),
-            key="speculative_mode",
-            help="When on, the system prompt encourages imaginative, confident answers even when data may be unknown.",
-        )
 
         # System prompt editor
         st.subheader("System Prompt")
@@ -431,11 +335,9 @@ def sidebar():
 
         # API key status
         st.subheader("API Keys")
-        openai_ok = bool(os.getenv("OPENAI_API_KEY"))
-        groq_ok = bool(os.getenv("GROQ_API_KEY"))
-        hf_ok = bool(os.getenv("HF_TOKEN"))
+        openai_ok = bool(os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None))
+        hf_ok = bool(os.getenv("HF_TOKEN") or st.secrets.get("HF_TOKEN", None))
         st.caption(f"OpenAI: {'✅ set' if openai_ok else '⚠️ missing'}")
-        st.caption(f"Groq: {'✅ set' if groq_ok else '⚠️ missing'}")
         st.caption(f"Hugging Face: {'✅ set' if hf_ok else '⚠️ missing'}")
 
         # Knowledge base uploader
@@ -475,41 +377,28 @@ def sidebar():
 
         # Debug tools
         with st.expander("Debug", expanded=False):
-            # Groq check
-            if st.button("Test Groq Connectivity"):
-                api_key = os.getenv("GROQ_API_KEY")
+            # OpenAI check
+            if st.button("Test OpenAI Connectivity"):
+                api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
                 if not api_key:
-                    st.error("GROQ_API_KEY is missing. Add it to your environment or Secrets.")
+                    st.error("OPENAI_API_KEY is missing. Add it to your environment or Secrets.")
                 else:
-                    provider, model_id = parse_model_choice(st.session_state.get("model_choice", ""))
-                    if provider != "groq":
-                        st.info("Switch the Model selector to a Groq model first.")
-                    else:
-                        url = "https://api.groq.com/openai/v1/chat/completions"
-                        payload = {
-                            "model": model_id,
-                            "messages": [
-                                {"role": "system", "content": "Connectivity test"},
-                                {"role": "user", "content": "Say 'hello'"},
-                            ],
-                            "max_tokens": 8,
-                            "temperature": 0.0,
-                        }
-                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"}
-                        try:
-                            r = requests.post(url, headers=headers, json=payload, timeout=30)
-                            if r.status_code != 200:
-                                st.error(f"Groq API error {r.status_code}: {r.text[:500]}")
-                            else:
-                                st.success("Groq connectivity OK")
-                                try:
-                                    st.json(r.json())
-                                except Exception:
-                                    st.write(r.text)
-                        except requests.Timeout:
-                            st.error("Groq connectivity test timed out.")
-                        except Exception as e:
-                            st.error(f"Groq connectivity test failed: {e}")
+                    try:
+                        # minimal test using requests to OpenAI-compatible endpoint only for visibility
+                        # Prefer SDK in normal flow; here we just surface success/failure.
+                        from openai import OpenAI  # type: ignore
+                        client = OpenAI(api_key=api_key)
+                        resp = client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=[{"role": "system", "content": "Connectivity test"},
+                                      {"role": "user", "content": "Say 'hello'"}],
+                            max_tokens=8,
+                            temperature=0.0,
+                        )
+                        st.success("OpenAI connectivity OK")
+                        st.json({"choices": [{"message": {"content": resp.choices[0].message.content}}]})
+                    except Exception as e:
+                        st.error(f"OpenAI connectivity test failed: {e}")
 
             # HF check
             if st.button("Test Hugging Face Connectivity"):
@@ -577,13 +466,6 @@ def main():
         model_choice = st.session_state["model_choice"]
         base_system_prompt = st.session_state["system_prompt"] or ""
 
-        # Speculative overlay (lets models improvise confidently)
-        if st.session_state.get("speculative_mode"):
-            base_system_prompt = (
-                "You are a speculative narrator. Invent plausible future details with confidence. "
-                "Do not refuse for lack of data; improvise vividly while keeping answers coherent.\n\n"
-            ) + base_system_prompt
-
         # RAG: build contextual system prompt using KB
         effective_system_prompt = base_system_prompt
         kb = st.session_state.get("kb")
@@ -607,11 +489,7 @@ def main():
         if provider == "openai":
             with st.spinner("Calling OpenAI…"):
                 assistant_text, error = call_openai(api_messages)
-        elif provider == "groq":
-            with st.spinner(f"Calling Groq ({model_id})…"):
-                assistant_text, error = call_groq(api_messages, model_id=model_id)
         elif provider == "huggingface":
-            # model_id comes from the selectbox label, which mirrors the text_input
             with st.spinner(f"Calling Hugging Face ({model_id})…"):
                 assistant_text, error = call_hf_inference(api_messages, model_id=model_id)
         else:
@@ -637,9 +515,6 @@ def main():
             provider = raw.get("provider")
             if provider == "openai":
                 st.caption("OpenAI Chat Completions payload")
-                st.json(raw.get("payload"))
-            elif provider == "groq":
-                st.caption("Groq Chat Completions payload")
                 st.json(raw.get("payload"))
             elif provider == "huggingface":
                 st.caption("Hugging Face Inference API payload")
