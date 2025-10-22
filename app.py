@@ -26,7 +26,7 @@ def get_openai_client():
         # New SDK (>=1.0)
         from openai import OpenAI  # type: ignore
 
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
         if not api_key:
             return None, None
         client = OpenAI(api_key=api_key)
@@ -36,7 +36,7 @@ def get_openai_client():
             # Legacy SDK (<1.0)
             import openai  # type: ignore
 
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
             if not api_key:
                 return None, None
             openai.api_key = api_key
@@ -51,12 +51,6 @@ def ensure_session_state():
     if "system_prompt" not in st.session_state:
         # Initialize with example prompt; users can edit/delete freely
         st.session_state["system_prompt"] = load_example_system_prompt()
-    if "hf_model_id" not in st.session_state:
-        # Default HF model (editable in the sidebar)
-        st.session_state["hf_model_id"] = "mistralai/Mistral-7B-Instruct-v0.2"
-    if "model_choice" not in st.session_state:
-        # Only two providers: OpenAI GPT-3.5 and the HF repo you set above
-        st.session_state["model_choice"] = "OpenAI: gpt-3.5-turbo"
     if "raw_request" not in st.session_state:
         st.session_state["raw_request"] = None
     if "kb" not in st.session_state:
@@ -113,7 +107,7 @@ def chunk_text(text: str, max_words: int = 220) -> List[str]:
         while start < len(tokens):
             end = min(start + max_words, len(tokens))
             piece_tokens = tokens[start:end]
-            # Reconstruct approximate text piece
+        # Reconstruct approximate text piece
             piece = " ".join(piece_tokens)
             chunks.append(piece)
             start = end
@@ -154,19 +148,9 @@ def retrieve_relevant_chunks(query: str, chunks: List[str], k: int = 3) -> List[
     return [c for _, c in scored[:k]]
 
 
-# --- Provider parsing ---
-def parse_model_choice(choice: str) -> Tuple[str, str]:
-    """Return (provider, model_id) from a selectbox label."""
-    if choice.startswith("OpenAI: "):
-        return "openai", choice.split("OpenAI: ", 1)[1]
-    if choice.startswith("HuggingFace: "):
-        return "huggingface", choice.split("HuggingFace: ", 1)[1]
-    return "unknown", choice
-
-
 # --- Model calls ---
 def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
-    """Call OpenAI Chat Completions API.
+    """Call OpenAI Chat Completions API (gpt-3.5-turbo).
 
     Returns (assistant_text, error_message). One will be None.
     Also stores raw request payload in session_state for debugging.
@@ -218,103 +202,13 @@ def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional
         return None, f"OpenAI error: {e}"
 
 
-def call_hf_inference(messages: List[Dict[str, str]], model_id: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Hugging Face Inference API backend (text-generation).
-    Expects HF_TOKEN in env or Streamlit secrets.
-    We map OpenAI-style messages to a single prompt appropriate for chat-tuned models.
-    """
-    hf_token = os.getenv("HF_TOKEN") or st.secrets.get("HF_TOKEN", None)
-    if not hf_token:
-        return None, "Missing HF_TOKEN. Create a Hugging Face access token and set HF_TOKEN."
-
-    # Collapse messages into a simple chat prompt
-    def to_prompt(msgs):
-        lines = []
-        for m in msgs:
-            role = m.get("role", "user")
-            content = m.get("content", "")
-            if role == "system":
-                lines.append(f"[SYSTEM] {content}")
-            elif role == "assistant":
-                lines.append(f"[ASSISTANT] {content}")
-            else:
-                lines.append(f"[USER] {content}")
-        lines.append("[ASSISTANT]")
-        return "\n".join(lines)
-
-    prompt = to_prompt(messages)
-
-    url = f"https://api-inference.huggingface.co/models/{model_id}"
-    headers = {"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"}
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 512,
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "repetition_penalty": 1.05,
-            "return_full_text": False
-        },
-        "options": {
-            "wait_for_model": True,      # first call cold start
-            "use_cache": True
-        }
-    }
-
-    st.session_state["raw_request"] = {"provider": "huggingface", "payload": {"model": model_id, **payload}}
-
-    try:
-        r = requests.post(url, headers=headers, json=payload, timeout=120)
-        if r.status_code != 200:
-            # HF returns informative errors (e.g., model loading, rate limit)
-            return None, f"HF API error {r.status_code}: {r.text[:500]}"
-        data = r.json()
-        # Typical shape: [{"generated_text": "..."}]
-        if isinstance(data, list) and data and isinstance(data[0], dict) and "generated_text" in data[0]:
-            text = data[0]["generated_text"]
-            return text.strip(), None
-        # Some models return a dict with error
-        if isinstance(data, dict) and "error" in data:
-            return None, f"HF API: {data['error']}"
-        return None, "Empty or unrecognised response from HF Inference API."
-    except requests.Timeout:
-        return None, "HF Inference API timeout."
-    except Exception as e:
-        return None, f"HF error: {e}"
-
-
 # --- UI ---
 def sidebar():
     with st.sidebar:
         st.header("Settings")
 
-        # --- Hugging Face model entry (free text so you can use any HF model ID) ---
-        st.subheader("Hugging Face")
-        hf_model_id = st.text_input(
-            "HF model repo (owner/name)",
-            value=st.session_state.get("hf_model_id", "mistralai/Mistral-7B-Instruct-v0.2"),
-            help="Examples: mistralai/Mistral-7B-Instruct-v0.2, mistralai/Mixtral-8x7B-Instruct-v0.1",
-        )
-        st.session_state["hf_model_id"] = hf_model_id.strip()
-
-        # --- Model selector (ONLY OpenAI + HF) ---
-        model_options = [
-            "OpenAI: gpt-3.5-turbo",
-            f"HuggingFace: {st.session_state['hf_model_id']}" if st.session_state['hf_model_id'] else "HuggingFace: <set model above>",
-        ]
-        current_choice = st.session_state.get("model_choice", model_options[0])
-        if current_choice not in model_options:
-            current_choice = model_options[0]
-        default_index = model_options.index(current_choice)
-
-        model = st.selectbox(
-            "Model",
-            model_options,
-            index=default_index,
-            help="Choose between OpenAI GPT-3.5 and the Hugging Face repo you set above.",
-        )
-        st.session_state["model_choice"] = model
+        # Model label (fixed; single option)
+        st.caption("Model: OpenAI gpt-3.5-turbo")
 
         # System prompt editor
         st.subheader("System Prompt")
@@ -336,9 +230,7 @@ def sidebar():
         # API key status
         st.subheader("API Keys")
         openai_ok = bool(os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None))
-        hf_ok = bool(os.getenv("HF_TOKEN") or st.secrets.get("HF_TOKEN", None))
         st.caption(f"OpenAI: {'✅ set' if openai_ok else '⚠️ missing'}")
-        st.caption(f"Hugging Face: {'✅ set' if hf_ok else '⚠️ missing'}")
 
         # Knowledge base uploader
         with st.expander("Knowledge Base (PDF)", expanded=False):
@@ -377,21 +269,20 @@ def sidebar():
 
         # Debug tools
         with st.expander("Debug", expanded=False):
-            # OpenAI check
             if st.button("Test OpenAI Connectivity"):
                 api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
                 if not api_key:
                     st.error("OPENAI_API_KEY is missing. Add it to your environment or Secrets.")
                 else:
                     try:
-                        # minimal test using requests to OpenAI-compatible endpoint only for visibility
-                        # Prefer SDK in normal flow; here we just surface success/failure.
                         from openai import OpenAI  # type: ignore
                         client = OpenAI(api_key=api_key)
                         resp = client.chat.completions.create(
                             model="gpt-3.5-turbo",
-                            messages=[{"role": "system", "content": "Connectivity test"},
-                                      {"role": "user", "content": "Say 'hello'"}],
+                            messages=[
+                                {"role": "system", "content": "Connectivity test"},
+                                {"role": "user", "content": "Say 'hello'"},
+                            ],
                             max_tokens=8,
                             temperature=0.0,
                         )
@@ -399,37 +290,6 @@ def sidebar():
                         st.json({"choices": [{"message": {"content": resp.choices[0].message.content}}]})
                     except Exception as e:
                         st.error(f"OpenAI connectivity test failed: {e}")
-
-            # HF check
-            if st.button("Test Hugging Face Connectivity"):
-                hf_token = os.getenv("HF_TOKEN") or st.secrets.get("HF_TOKEN", None)
-                model_id = st.session_state.get("hf_model_id", "").strip()
-                if not hf_token:
-                    st.error("HF_TOKEN is missing. Add it to your environment or Secrets.")
-                elif not model_id:
-                    st.error("Provide a Hugging Face model repo ID above.")
-                else:
-                    try:
-                        url = f"https://api-inference.huggingface.co/models/{model_id}"
-                        headers = {"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"}
-                        payload = {
-                            "inputs": "[SYSTEM] Connectivity test\n[USER] Say 'hello'\n[ASSISTANT]",
-                            "parameters": {"max_new_tokens": 12, "temperature": 0.2, "return_full_text": False},
-                            "options": {"wait_for_model": True}
-                        }
-                        r = requests.post(url, headers=headers, json=payload, timeout=120)
-                        if r.status_code != 200:
-                            st.error(f"HF API error {r.status_code}: {r.text[:500]}")
-                        else:
-                            st.success("Hugging Face connectivity OK")
-                            try:
-                                st.json(r.json())
-                            except Exception:
-                                st.write(r.text)
-                    except requests.Timeout:
-                        st.error("HF connectivity test timed out.")
-                    except Exception as e:
-                        st.error(f"HF connectivity test failed: {e}")
 
 
 def render_chat():
@@ -462,8 +322,7 @@ def main():
         # Append user message to history
         st.session_state["messages"].append({"role": "user", "content": user_input})
 
-        # Prepare request based on selected model
-        model_choice = st.session_state["model_choice"]
+        # Prepare request (fixed model: OpenAI GPT-3.5)
         base_system_prompt = st.session_state["system_prompt"] or ""
 
         # RAG: build contextual system prompt using KB
@@ -484,16 +343,8 @@ def main():
         # Build OpenAI-compatible messages
         api_messages = [{"role": "system", "content": effective_system_prompt}] + st.session_state["messages"]
 
-        provider, model_id = parse_model_choice(model_choice)
-
-        if provider == "openai":
-            with st.spinner("Calling OpenAI…"):
-                assistant_text, error = call_openai(api_messages)
-        elif provider == "huggingface":
-            with st.spinner(f"Calling Hugging Face ({model_id})…"):
-                assistant_text, error = call_hf_inference(api_messages, model_id=model_id)
-        else:
-            assistant_text, error = None, "Unknown provider/model selection."
+        with st.spinner("Calling OpenAI…"):
+            assistant_text, error = call_openai(api_messages)
 
         if error:
             st.error(error)
@@ -512,15 +363,8 @@ def main():
         if not raw:
             st.info("No request sent yet.")
         else:
-            provider = raw.get("provider")
-            if provider == "openai":
-                st.caption("OpenAI Chat Completions payload")
-                st.json(raw.get("payload"))
-            elif provider == "huggingface":
-                st.caption("Hugging Face Inference API payload")
-                st.json(raw.get("payload"))
-            else:
-                st.json(raw)
+            st.caption("OpenAI Chat Completions payload")
+            st.json(raw.get("payload"))
 
 
 if __name__ == "__main__":
