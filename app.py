@@ -52,7 +52,8 @@ def ensure_session_state():
         # Initialize with example prompt; users can edit/delete freely
         st.session_state["system_prompt"] = load_example_system_prompt()
     if "model_choice" not in st.session_state:
-        st.session_state["model_choice"] = "Groq: gemma2-9b-it"
+        # Use a supported Groq default; falls back gracefully in UI if unavailable
+        st.session_state["model_choice"] = "Groq: llama-3.1-8b-instant"
     if "raw_request" not in st.session_state:
         st.session_state["raw_request"] = None
     if "kb" not in st.session_state:
@@ -64,10 +65,6 @@ def load_example_system_prompt() -> str:
         "You are a helpful AI assistant. Your job is to answer questions as clearly "
         "and accurately as you can. Keep your tone friendly, but professional."
     )
-
-
-# --- Prompt formatting for HF instruct model ---
- 
 
 
 # --- Knowledge base helpers ---
@@ -154,6 +151,47 @@ def retrieve_relevant_chunks(query: str, chunks: List[str], k: int = 3) -> List[
     return [c for _, c in scored[:k]]
 
 
+# --- Groq helpers: live model list + label formatting ---
+@st.cache_data(ttl=600)
+def fetch_groq_models() -> List[str]:
+    """Return list of Groq model IDs from the live /models endpoint, or [] on failure."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return []
+    try:
+        r = requests.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        items = data.get("data", [])
+        ids = [m.get("id", "") for m in items if isinstance(m, dict)]
+        # Prefer a stable, fast default first if present
+        preferred_order = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+        ]
+        ordered = [m for m in preferred_order if m in ids] + sorted([m for m in ids if m not in preferred_order])
+        return ordered
+    except Exception:
+        return []
+
+
+def label_for_groq(model_id: str) -> str:
+    return f"Groq: {model_id}"
+
+
+def parse_model_choice(choice: str) -> Tuple[str, str]:
+    """Return (provider, model_id) from a selectbox label."""
+    if choice.startswith("Groq: "):
+        return "groq", choice.split("Groq: ", 1)[1]
+    if choice.startswith("OpenAI: "):
+        return "openai", choice.split("OpenAI: ", 1)[1]
+    return "unknown", choice
+
+
 # --- Model calls ---
 def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
     """Call OpenAI Chat Completions API.
@@ -208,11 +246,8 @@ def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional
         return None, f"OpenAI error: {e}"
 
 
- 
-
-
-def call_groq(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
-    """Call Groq Chat Completions API for gemma2-9b-it.
+def call_groq(messages: List[Dict[str, str]], model_id: str) -> Tuple[Optional[str], Optional[str]]:
+    """Call Groq Chat Completions API for the given model_id.
 
     Returns (assistant_text, error_message). Also stores raw request in session state.
     """
@@ -220,12 +255,12 @@ def call_groq(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[s
     if not api_key:
         return None, "Missing GROQ_API_KEY. Set it in your environment or .env."
 
-    model = "gemma2-9b-it"
+    # Sensible defaults
     temperature = 0.3
     max_tokens = 512
 
     payload = {
-        "model": model,
+        "model": model_id,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -239,7 +274,7 @@ def call_groq(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[s
         "Accept": "application/json",
     }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
         if resp.status_code != 200:
             return None, f"Groq API error {resp.status_code}: {resp.text}"
         data = resp.json()
@@ -251,8 +286,10 @@ def call_groq(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[s
             if msg and isinstance(msg.get("content"), str):
                 text = msg["content"]
         if not text or not text.strip():
-            return None, "Empty response from Groq."
+            return None, "Empty response from Groq. (Model may be unavailable or deprecated.)"
         return text.strip(), None
+    except requests.Timeout:
+        return None, "Groq error: request timed out. Try a different model or reduce max_tokens."
     except Exception as e:
         return None, f"Groq error: {e}"
 
@@ -262,17 +299,26 @@ def sidebar():
     with st.sidebar:
         st.header("Settings")
 
-        # Model selector
-        model_options = [
-            "Groq: gemma2-9b-it",
+        # --- Dynamic Groq model list (falls back if API/key missing) ---
+        groq_models = fetch_groq_models()
+        groq_default = "llama-3.1-8b-instant"
+        groq_labels = [label_for_groq(m) for m in groq_models] if groq_models else [label_for_groq(groq_default)]
+
+        # --- Model selector (Groq first, then OpenAI) ---
+        model_options = groq_labels + [
             "OpenAI: gpt-3.5-turbo",
         ]
         current_choice = st.session_state.get("model_choice", model_options[0])
-        default_index = 0 if current_choice.startswith("Groq") else 1
+        # Ensure the current choice exists in options
+        if current_choice not in model_options:
+            current_choice = model_options[0]
+        default_index = model_options.index(current_choice)
+
         model = st.selectbox(
             "Model",
             model_options,
             index=default_index,
+            help="Groq list comes from the live /models endpoint when available.",
         )
         st.session_state["model_choice"] = model
 
@@ -299,8 +345,6 @@ def sidebar():
         groq_ok = bool(os.getenv("GROQ_API_KEY"))
         st.caption(f"OpenAI: {'✅ set' if openai_ok else '⚠️ missing'}")
         st.caption(f"Groq: {'✅ set' if groq_ok else '⚠️ missing'}")
-
-        # (Former Test Inputs removed)
 
         # Knowledge base uploader
         with st.expander("Knowledge Base (PDF)", expanded=False):
@@ -344,29 +388,36 @@ def sidebar():
                 if not api_key:
                     st.error("GROQ_API_KEY is missing. Add it to your environment or Secrets.")
                 else:
-                    url = "https://api.groq.com/openai/v1/chat/completions"
-                    payload = {
-                        "model": "gemma2-9b-it",
-                        "messages": [
-                            {"role": "system", "content": "Connectivity test"},
-                            {"role": "user", "content": "Say 'hello'"},
-                        ],
-                        "max_tokens": 4,
-                        "temperature": 0.1,
-                    }
-                    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"}
-                    try:
-                        r = requests.post(url, headers=headers, json=payload, timeout=60)
-                        if r.status_code != 200:
-                            st.error(f"Groq API error {r.status_code}: {r.text[:500]}")
-                        else:
-                            st.success("Groq connectivity OK")
-                            try:
-                                st.json(r.json())
-                            except Exception:
-                                st.write(r.text)
-                    except Exception as e:
-                        st.error(f"Groq connectivity test failed: {e}")
+                    # Use the currently selected Groq model if applicable
+                    provider, model_id = parse_model_choice(st.session_state.get("model_choice", ""))
+                    if provider != "groq":
+                        st.info("Switch the Model selector to a Groq model first.")
+                    else:
+                        url = "https://api.groq.com/openai/v1/chat/completions"
+                        payload = {
+                            "model": model_id,
+                            "messages": [
+                                {"role": "system", "content": "Connectivity test"},
+                                {"role": "user", "content": "Say 'hello'"},
+                            ],
+                            "max_tokens": 8,
+                            "temperature": 0.0,
+                        }
+                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"}
+                        try:
+                            r = requests.post(url, headers=headers, json=payload, timeout=30)
+                            if r.status_code != 200:
+                                st.error(f"Groq API error {r.status_code}: {r.text[:500]}")
+                            else:
+                                st.success("Groq connectivity OK")
+                                try:
+                                    st.json(r.json())
+                                except Exception:
+                                    st.write(r.text)
+                        except requests.Timeout:
+                            st.error("Groq connectivity test timed out.")
+                        except Exception as e:
+                            st.error(f"Groq connectivity test failed: {e}")
 
 
 def render_chat():
@@ -418,18 +469,19 @@ def main():
                     f"{context}"
                 )
 
-        if model_choice.startswith("OpenAI"):
-            # Prepend system message
-            api_messages = [{"role": "system", "content": effective_system_prompt}] + st.session_state["messages"]
+        # Build OpenAI-compatible messages
+        api_messages = [{"role": "system", "content": effective_system_prompt}] + st.session_state["messages"]
 
+        provider, model_id = parse_model_choice(model_choice)
+
+        if provider == "openai":
             with st.spinner("Calling OpenAI…"):
                 assistant_text, error = call_openai(api_messages)
-
+        elif provider == "groq":
+            with st.spinner(f"Calling Groq ({model_id})…"):
+                assistant_text, error = call_groq(api_messages, model_id=model_id)
         else:
-            # Groq uses OpenAI-compatible chat API
-            api_messages = [{"role": "system", "content": effective_system_prompt}] + st.session_state["messages"]
-            with st.spinner("Calling Groq…"):
-                assistant_text, error = call_groq(api_messages)
+            assistant_text, error = None, "Unknown provider/model selection."
 
         if error:
             st.error(error)
