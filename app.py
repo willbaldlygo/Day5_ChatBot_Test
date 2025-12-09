@@ -55,6 +55,8 @@ def ensure_session_state():
         st.session_state["raw_request"] = None
     if "kb" not in st.session_state:
         st.session_state["kb"] = None  # dict with {text, chunks, pages, filename}
+    if "model_provider" not in st.session_state:
+        st.session_state["model_provider"] = "OpenAI"  # Default to OpenAI
 
 
 def load_example_system_prompt() -> str:
@@ -149,6 +151,72 @@ def retrieve_relevant_chunks(query: str, chunks: List[str], k: int = 3) -> List[
 
 
 # --- Model calls ---
+def call_huggingface(messages: List[Dict[str, str]], model: str = "google/flan-t5-small") -> Tuple[Optional[str], Optional[str]]:
+    """Call Hugging Face Inference API.
+
+    Returns (assistant_text, error_message). One will be None.
+    Also stores raw request payload in session_state for debugging.
+    """
+    api_key = os.getenv("HUGGINGFACE_API_KEY") or st.secrets.get("HUGGINGFACE_API_KEY", None)
+    if not api_key:
+        return None, "Missing HUGGINGFACE_API_KEY. Set it in your environment or .env file."
+
+    # Hugging Face Inference API endpoint
+    hf_url = f"https://api-inference.huggingface.co/models/{model}"
+
+    # Convert chat messages to a single prompt (HF models don't use chat format)
+    prompt_parts = []
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "system":
+            prompt_parts.append(f"System: {content}")
+        elif role == "user":
+            prompt_parts.append(f"User: {content}")
+        elif role == "assistant":
+            prompt_parts.append(f"Assistant: {content}")
+
+    prompt = "\n".join(prompt_parts) + "\nAssistant:"
+
+    # Prepare raw payload for display
+    raw_payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 512,
+            "temperature": 0.7,
+            "return_full_text": False
+        }
+    }
+    st.session_state["raw_request"] = {"provider": "huggingface", "payload": raw_payload, "model": model}
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    try:
+        response = requests.post(hf_url, headers=headers, json=raw_payload, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+
+        # Handle different response formats
+        if isinstance(result, list) and len(result) > 0:
+            text = result[0].get("generated_text", "")
+        elif isinstance(result, dict):
+            text = result.get("generated_text", "") or result.get("text", "")
+        else:
+            text = ""
+
+        if not text or not text.strip():
+            return None, "Empty response from Hugging Face."
+        return text.strip(), None
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 503:
+            return None, "Model is loading on Hugging Face (this can take 20-30 seconds). Please try again."
+        return None, f"Hugging Face API error: {e}"
+    except requests.exceptions.Timeout:
+        return None, "Hugging Face request timed out."
+    except Exception as e:
+        return None, f"Hugging Face error: {e}"
+
+
 def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
     """Call OpenAI Chat Completions API (gpt-3.5-turbo).
 
@@ -207,8 +275,18 @@ def sidebar():
     with st.sidebar:
         st.header("Settings")
 
-        # Model label (fixed; single option)
-        st.caption("Model: OpenAI gpt-3.5-turbo")
+        # Model provider selection
+        st.subheader("Model Selection")
+        provider = st.selectbox(
+            "Choose Provider",
+            ["OpenAI (GPT-3.5-Turbo)", "Hugging Face (FLAN-T5-Small)"],
+            index=0 if st.session_state.get("model_provider") == "OpenAI" else 1
+        )
+        # Update session state based on selection
+        if "OpenAI" in provider:
+            st.session_state["model_provider"] = "OpenAI"
+        else:
+            st.session_state["model_provider"] = "HuggingFace"
 
         # System prompt editor
         st.subheader("System Prompt")
@@ -227,10 +305,14 @@ def sidebar():
             if st.button("Load Example Prompt", use_container_width=True):
                 st.session_state["system_prompt"] = load_example_system_prompt()
 
-        # API key status
-        st.subheader("API Keys")
+        # API key / service status
+        st.subheader("Service Status")
         openai_ok = bool(os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None))
-        st.caption(f"OpenAI: {'✅ set' if openai_ok else '⚠️ missing'}")
+        st.caption(f"OpenAI API: {'✅ set' if openai_ok else '⚠️ missing'}")
+
+        # Check Hugging Face API key
+        hf_ok = bool(os.getenv("HUGGINGFACE_API_KEY") or st.secrets.get("HUGGINGFACE_API_KEY", None))
+        st.caption(f"Hugging Face API: {'✅ set' if hf_ok else '⚠️ missing'}")
 
         # Knowledge base uploader
         with st.expander("Knowledge Base (PDF)", expanded=False):
@@ -322,7 +404,7 @@ def main():
         # Append user message to history
         st.session_state["messages"].append({"role": "user", "content": user_input})
 
-        # Prepare request (fixed model: OpenAI GPT-3.5)
+        # Prepare request based on selected provider
         base_system_prompt = st.session_state["system_prompt"] or ""
 
         # RAG: build contextual system prompt using KB
@@ -340,11 +422,17 @@ def main():
                     f"{context}"
                 )
 
-        # Build OpenAI-compatible messages
+        # Build API-compatible messages
         api_messages = [{"role": "system", "content": effective_system_prompt}] + st.session_state["messages"]
 
-        with st.spinner("Calling OpenAI…"):
-            assistant_text, error = call_openai(api_messages)
+        # Call appropriate provider
+        provider = st.session_state.get("model_provider", "OpenAI")
+        if provider == "HuggingFace":
+            with st.spinner("Calling Hugging Face (FLAN-T5-Small)…"):
+                assistant_text, error = call_huggingface(api_messages, model="google/flan-t5-small")
+        else:
+            with st.spinner("Calling OpenAI (GPT-3.5)…"):
+                assistant_text, error = call_openai(api_messages)
 
         if error:
             st.error(error)
@@ -363,7 +451,8 @@ def main():
         if not raw:
             st.info("No request sent yet.")
         else:
-            st.caption("OpenAI Chat Completions payload")
+            provider_name = raw.get("provider", "unknown").title()
+            st.caption(f"{provider_name} API payload")
             st.json(raw.get("payload"))
 
 
