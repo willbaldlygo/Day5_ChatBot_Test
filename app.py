@@ -56,7 +56,7 @@ def ensure_session_state():
     if "kb" not in st.session_state:
         st.session_state["kb"] = None  # dict with {text, chunks, pages, filename}
     if "model_provider" not in st.session_state:
-        st.session_state["model_provider"] = "OpenAI"  # Default to OpenAI
+        st.session_state["model_provider"] = "Groq"  # Default to Groq
 
 
 def load_example_system_prompt() -> str:
@@ -258,8 +258,8 @@ def sidebar():
         st.subheader("Model Selection")
         provider = st.selectbox(
             "Choose Provider",
-            ["OpenAI (GPT-3.5-Turbo)", "Groq (Llama 3.1 8B)"],
-            index=0 if st.session_state.get("model_provider") == "OpenAI" else 1
+            ["Groq (Llama 3.1 8B)", "OpenAI (GPT-3.5-Turbo)"],
+            index=0 if st.session_state.get("model_provider") == "Groq" else 1
         )
         # Update session state based on selection
         if "OpenAI" in provider:
