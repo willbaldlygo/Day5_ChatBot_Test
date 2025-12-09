@@ -414,9 +414,11 @@ def main():
                 assistant_text, error = call_openai(api_messages)
 
         if error:
-            st.error(error)
-        else:
+            st.error(f"Error: {error}")
+        elif assistant_text:
             st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
+        else:
+            st.error("No response received from the API. Please check your API key and try again.")
 
         # Re-render updated conversation
         if hasattr(st, "rerun"):
