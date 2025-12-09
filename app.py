@@ -151,7 +151,7 @@ def retrieve_relevant_chunks(query: str, chunks: List[str], k: int = 3) -> List[
 
 
 # --- Model calls ---
-def call_groq(messages: List[Dict[str, str]], model: str = "llama-3.2-1b-preview") -> Tuple[Optional[str], Optional[str]]:
+def call_groq(messages: List[Dict[str, str]], model: str = "llama-3.2-1b-it") -> Tuple[Optional[str], Optional[str]]:
     """Call Groq API for fast inference with smaller models.
 
     Returns (assistant_text, error_message). One will be None.
@@ -408,7 +408,7 @@ def main():
         provider = st.session_state.get("model_provider", "OpenAI")
         if provider == "Groq":
             with st.spinner("Calling Groq (Llama 3.2 1B)…"):
-                assistant_text, error = call_groq(api_messages, model="llama-3.2-1b-preview")
+                assistant_text, error = call_groq(api_messages, model="llama-3.2-1b-it")
         else:
             with st.spinner("Calling OpenAI (GPT-3.5)…"):
                 assistant_text, error = call_openai(api_messages)
