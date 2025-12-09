@@ -151,7 +151,7 @@ def retrieve_relevant_chunks(query: str, chunks: List[str], k: int = 3) -> List[
 
 
 # --- Model calls ---
-def call_groq(messages: List[Dict[str, str]], model: str = "llama-3.2-1b-it") -> Tuple[Optional[str], Optional[str]]:
+def call_groq(messages: List[Dict[str, str]], model: str = "gemma-7b-it") -> Tuple[Optional[str], Optional[str]]:
     """Call Groq API for fast inference with smaller models.
 
     Returns (assistant_text, error_message). One will be None.
@@ -258,7 +258,7 @@ def sidebar():
         st.subheader("Model Selection")
         provider = st.selectbox(
             "Choose Provider",
-            ["OpenAI (GPT-3.5-Turbo)", "Groq (Llama 3.2 1B)"],
+            ["OpenAI (GPT-3.5-Turbo)", "Groq (Gemma 7B)"],
             index=0 if st.session_state.get("model_provider") == "OpenAI" else 1
         )
         # Update session state based on selection
@@ -407,8 +407,8 @@ def main():
         # Call appropriate provider
         provider = st.session_state.get("model_provider", "OpenAI")
         if provider == "Groq":
-            with st.spinner("Calling Groq (Llama 3.2 1B)…"):
-                assistant_text, error = call_groq(api_messages, model="llama-3.2-1b-it")
+            with st.spinner("Calling Groq (Gemma 7B)…"):
+                assistant_text, error = call_groq(api_messages, model="gemma-7b-it")
         else:
             with st.spinner("Calling OpenAI (GPT-3.5)…"):
                 assistant_text, error = call_openai(api_messages)
