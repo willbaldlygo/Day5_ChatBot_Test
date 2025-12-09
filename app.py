@@ -413,12 +413,16 @@ def main():
             with st.spinner("Calling OpenAI (GPT-3.5)…"):
                 assistant_text, error = call_openai(api_messages)
 
+        # Store the error or response in session state so it persists after rerun
         if error:
-            st.error(f"Error: {error}")
+            st.session_state["last_error"] = error
+            st.session_state["messages"].append({"role": "assistant", "content": f"❌ Error: {error}"})
         elif assistant_text:
+            st.session_state["last_error"] = None
             st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
         else:
-            st.error("No response received from the API. Please check your API key and try again.")
+            st.session_state["last_error"] = "No response received"
+            st.session_state["messages"].append({"role": "assistant", "content": "❌ No response received from the API. Please check your API key and try again."})
 
         # Re-render updated conversation
         if hasattr(st, "rerun"):
