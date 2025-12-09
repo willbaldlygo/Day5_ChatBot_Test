@@ -151,70 +151,49 @@ def retrieve_relevant_chunks(query: str, chunks: List[str], k: int = 3) -> List[
 
 
 # --- Model calls ---
-def call_huggingface(messages: List[Dict[str, str]], model: str = "google/flan-t5-small") -> Tuple[Optional[str], Optional[str]]:
-    """Call Hugging Face Inference API.
+def call_groq(messages: List[Dict[str, str]], model: str = "llama-3.2-1b-preview") -> Tuple[Optional[str], Optional[str]]:
+    """Call Groq API for fast inference with smaller models.
 
     Returns (assistant_text, error_message). One will be None.
     Also stores raw request payload in session_state for debugging.
     """
-    api_key = os.getenv("HUGGINGFACE_API_KEY") or st.secrets.get("HUGGINGFACE_API_KEY", None)
+    api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
     if not api_key:
-        return None, "Missing HUGGINGFACE_API_KEY. Set it in your environment or .env file."
+        return None, "Missing GROQ_API_KEY. Get a free key at https://console.groq.com"
 
-    # Hugging Face Inference API endpoint
-    hf_url = f"https://api-inference.huggingface.co/models/{model}"
-
-    # Convert chat messages to a single prompt (HF models don't use chat format)
-    prompt_parts = []
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if role == "system":
-            prompt_parts.append(f"System: {content}")
-        elif role == "user":
-            prompt_parts.append(f"User: {content}")
-        elif role == "assistant":
-            prompt_parts.append(f"Assistant: {content}")
-
-    prompt = "\n".join(prompt_parts) + "\nAssistant:"
+    # Groq Chat Completions API endpoint
+    groq_url = "https://api.groq.com/openai/v1/chat/completions"
 
     # Prepare raw payload for display
     raw_payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 512,
-            "temperature": 0.7,
-            "return_full_text": False
-        }
+        "model": model,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 512,
     }
-    st.session_state["raw_request"] = {"provider": "huggingface", "payload": raw_payload, "model": model}
+    st.session_state["raw_request"] = {"provider": "groq", "payload": raw_payload, "model": model}
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
 
     try:
-        response = requests.post(hf_url, headers=headers, json=raw_payload, timeout=60)
+        response = requests.post(groq_url, headers=headers, json=raw_payload, timeout=30)
         response.raise_for_status()
         result = response.json()
 
-        # Handle different response formats
-        if isinstance(result, list) and len(result) > 0:
-            text = result[0].get("generated_text", "")
-        elif isinstance(result, dict):
-            text = result.get("generated_text", "") or result.get("text", "")
-        else:
-            text = ""
+        text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
 
         if not text or not text.strip():
-            return None, "Empty response from Hugging Face."
+            return None, "Empty response from Groq."
         return text.strip(), None
     except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 503:
-            return None, "Model is loading on Hugging Face (this can take 20-30 seconds). Please try again."
-        return None, f"Hugging Face API error: {e}"
+        return None, f"Groq API error: {e} - {e.response.text if hasattr(e, 'response') else ''}"
     except requests.exceptions.Timeout:
-        return None, "Hugging Face request timed out."
+        return None, "Groq request timed out."
     except Exception as e:
-        return None, f"Hugging Face error: {e}"
+        return None, f"Groq error: {e}"
 
 
 def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
@@ -279,14 +258,14 @@ def sidebar():
         st.subheader("Model Selection")
         provider = st.selectbox(
             "Choose Provider",
-            ["OpenAI (GPT-3.5-Turbo)", "Hugging Face (FLAN-T5-Small)"],
+            ["OpenAI (GPT-3.5-Turbo)", "Groq (Llama 3.2 1B)"],
             index=0 if st.session_state.get("model_provider") == "OpenAI" else 1
         )
         # Update session state based on selection
         if "OpenAI" in provider:
             st.session_state["model_provider"] = "OpenAI"
         else:
-            st.session_state["model_provider"] = "HuggingFace"
+            st.session_state["model_provider"] = "Groq"
 
         # System prompt editor
         st.subheader("System Prompt")
@@ -310,9 +289,9 @@ def sidebar():
         openai_ok = bool(os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None))
         st.caption(f"OpenAI API: {'✅ set' if openai_ok else '⚠️ missing'}")
 
-        # Check Hugging Face API key
-        hf_ok = bool(os.getenv("HUGGINGFACE_API_KEY") or st.secrets.get("HUGGINGFACE_API_KEY", None))
-        st.caption(f"Hugging Face API: {'✅ set' if hf_ok else '⚠️ missing'}")
+        # Check Groq API key
+        groq_ok = bool(os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None))
+        st.caption(f"Groq API: {'✅ set' if groq_ok else '⚠️ missing'}")
 
         # Knowledge base uploader
         with st.expander("Knowledge Base (PDF)", expanded=False):
@@ -427,9 +406,9 @@ def main():
 
         # Call appropriate provider
         provider = st.session_state.get("model_provider", "OpenAI")
-        if provider == "HuggingFace":
-            with st.spinner("Calling Hugging Face (FLAN-T5-Small)…"):
-                assistant_text, error = call_huggingface(api_messages, model="google/flan-t5-small")
+        if provider == "Groq":
+            with st.spinner("Calling Groq (Llama 3.2 1B)…"):
+                assistant_text, error = call_groq(api_messages, model="llama-3.2-1b-preview")
         else:
             with st.spinner("Calling OpenAI (GPT-3.5)…"):
                 assistant_text, error = call_openai(api_messages)
