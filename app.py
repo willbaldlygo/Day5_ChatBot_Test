@@ -196,6 +196,75 @@ def call_groq(messages: List[Dict[str, str]], model: str = "llama-3.1-8b-instant
         return None, f"Groq error: {e}"
 
 
+def call_huggingface(messages: List[Dict[str, str]], model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0") -> Tuple[Optional[str], Optional[str]]:
+    """Call Hugging Face Inference API for TinyLlama.
+
+    Returns (assistant_text, error_message). One will be None.
+    Also stores raw request payload in session_state for debugging.
+    """
+    api_key = os.getenv("HF_API_KEY") or st.secrets.get("HF_API_KEY", None)
+    if not api_key:
+        return None, "Missing HF_API_KEY. Get a free token at https://huggingface.co/settings/tokens"
+
+    hf_url = f"https://api-inference.huggingface.co/models/{model}"
+
+    # Build prompt using TinyLlama's chat template
+    prompt_parts = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content_text = msg.get("content", "")
+        if role == "system":
+            prompt_parts.append(f"<|system|>\n{content_text}</s>")
+        elif role == "user":
+            prompt_parts.append(f"<|user|>\n{content_text}</s>")
+        elif role == "assistant":
+            prompt_parts.append(f"<|assistant|>\n{content_text}</s>")
+    
+    # Add assistant prompt to trigger generation
+    prompt = "\n".join(prompt_parts) + "\n<|assistant|>\n"
+
+    # Prepare raw payload for display
+    raw_payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 512,
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "do_sample": True,
+            "return_full_text": False,
+        },
+    }
+    st.session_state["raw_request"] = {"provider": "huggingface", "payload": raw_payload, "model": model}
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(hf_url, headers=headers, json=raw_payload, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+
+        # Hugging Face returns a list with generated_text
+        if isinstance(result, list) and len(result) > 0:
+            text = result[0].get("generated_text", "")
+        else:
+            text = result.get("generated_text", "") if isinstance(result, dict) else ""
+
+        if not text or not text.strip():
+            return None, "Empty response from Hugging Face."
+        return text.strip(), None
+    except requests.exceptions.HTTPError as e:
+        error_msg = e.response.text if hasattr(e, 'response') else str(e)
+        return None, f"Hugging Face API error: {e} - {error_msg}"
+    except requests.exceptions.Timeout:
+        return None, "Hugging Face request timed out."
+    except Exception as e:
+        return None, f"Hugging Face error: {e}"
+
+
+
 def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
     """Call OpenAI Chat Completions API (gpt-3.5-turbo).
 
@@ -256,14 +325,24 @@ def sidebar():
 
         # Model provider selection
         st.subheader("Model Selection")
+        provider_options = ["Groq (Llama 3.1 8B)", "HuggingFace (TinyLlama 1.1B)", "OpenAI (GPT-3.5-Turbo)"]
+        current_provider = st.session_state.get("model_provider", "Groq")
+        if current_provider == "Groq":
+            default_index = 0
+        elif current_provider == "HuggingFace":
+            default_index = 1
+        else:
+            default_index = 2
         provider = st.selectbox(
             "Choose Provider",
-            ["Groq (Llama 3.1 8B)", "OpenAI (GPT-3.5-Turbo)"],
-            index=0 if st.session_state.get("model_provider") == "Groq" else 1
+            provider_options,
+            index=default_index
         )
         # Update session state based on selection
         if "OpenAI" in provider:
             st.session_state["model_provider"] = "OpenAI"
+        elif "HuggingFace" in provider:
+            st.session_state["model_provider"] = "HuggingFace"
         else:
             st.session_state["model_provider"] = "Groq"
 
@@ -292,6 +371,10 @@ def sidebar():
         # Check Groq API key
         groq_ok = bool(os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None))
         st.caption(f"Groq API: {'✅ set' if groq_ok else '⚠️ missing'}")
+
+        # Check HuggingFace API key
+        hf_ok = bool(os.getenv("HF_API_KEY") or st.secrets.get("HF_API_KEY", None))
+        st.caption(f"HuggingFace API: {'✅ set' if hf_ok else '⚠️ missing'}")
 
         # Knowledge base uploader
         with st.expander("Knowledge Base (PDF)", expanded=False):
@@ -405,10 +488,13 @@ def main():
         api_messages = [{"role": "system", "content": effective_system_prompt}] + st.session_state["messages"]
 
         # Call appropriate provider
-        provider = st.session_state.get("model_provider", "OpenAI")
+        provider = st.session_state.get("model_provider", "Groq")
         if provider == "Groq":
             with st.spinner("Calling Groq (Llama 3.1 8B)…"):
                 assistant_text, error = call_groq(api_messages, model="llama-3.1-8b-instant")
+        elif provider == "HuggingFace":
+            with st.spinner("Calling HuggingFace (TinyLlama 1.1B)…"):
+                assistant_text, error = call_huggingface(api_messages)
         else:
             with st.spinner("Calling OpenAI (GPT-3.5)…"):
                 assistant_text, error = call_openai(api_messages)
