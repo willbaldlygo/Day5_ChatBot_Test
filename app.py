@@ -265,6 +265,53 @@ def call_huggingface(messages: List[Dict[str, str]], model: str = "TinyLlama/Tin
 
 
 
+def call_huggingface(messages: List[Dict[str, str]], model: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0") -> Tuple[Optional[str], Optional[str]]:
+    """Call Hugging Face Inference API for TinyLlama using OpenAI-compatible endpoint.
+
+    Returns (assistant_text, error_message). One will be None.
+    Also stores raw request payload in session_state for debugging.
+    """
+    api_key = os.getenv("HF_API_KEY") or st.secrets.get("HF_API_KEY", None)
+    if not api_key:
+        return None, "Missing HF_API_KEY. Get a free token at https://huggingface.co/settings/tokens"
+
+    # New HuggingFace OpenAI-compatible endpoint
+    hf_url = "https://router.huggingface.co/v1/chat/completions"
+
+    # Prepare payload in OpenAI format
+    raw_payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 512,
+        "temperature": 0.7,
+    }
+    st.session_state["raw_request"] = {"provider": "huggingface", "payload": raw_payload, "model": model}
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        response = requests.post(hf_url, headers=headers, json=raw_payload, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+
+        # OpenAI-compatible format returns choices[0].message.content
+        text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        if not text or not text.strip():
+            return None, "Empty response from Hugging Face."
+        return text.strip(), None
+    except requests.exceptions.HTTPError as e:
+        error_msg = e.response.text if hasattr(e, 'response') else str(e)
+        return None, f"Hugging Face API error: {e} - {error_msg}"
+    except requests.exceptions.Timeout:
+        return None, "Hugging Face request timed out."
+    except Exception as e:
+        return None, f"Hugging Face error: {e}"
+
+
 def call_openai(messages: List[Dict[str, str]]) -> Tuple[Optional[str], Optional[str]]:
     """Call OpenAI Chat Completions API (gpt-3.5-turbo).
 
