@@ -206,7 +206,7 @@ def call_huggingface(messages: List[Dict[str, str]], model: str = "TinyLlama/Tin
     if not api_key:
         return None, "Missing HF_API_KEY. Get a free token at https://huggingface.co/settings/tokens"
 
-    hf_url = f"https://api-inference.huggingface.co/models/{model}"
+    hf_url = f"https://router.huggingface.co/hf-inference/models/{model}"
 
     # Build prompt using TinyLlama's chat template
     prompt_parts = []
