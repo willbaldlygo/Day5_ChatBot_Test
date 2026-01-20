@@ -8,6 +8,11 @@ import streamlit as st
 import requests
 from dotenv import load_dotenv
 from pypdf import PdfReader
+try:
+    from docx import Document as DocxDocument
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
 
 
 # --- Setup ---
@@ -89,6 +94,45 @@ def extract_pdf_text(file_bytes: bytes) -> Tuple[str, int]:
         full = "\n\n".join(texts)
         return full, pages
     except Exception:
+        return "", 0
+
+
+def extract_text_file(file_bytes: bytes) -> Tuple[str, int]:
+    """Extract text from .txt or .md files."""
+    try:
+        text = file_bytes.decode("utf-8")
+        # Estimate "pages" as ~3000 chars per page
+        pages = max(1, len(text) // 3000)
+        return text, pages
+    except Exception:
+        return "", 0
+
+
+def extract_docx_text(file_bytes: bytes) -> Tuple[str, int]:
+    """Extract text from .docx files."""
+    if not DOCX_AVAILABLE:
+        return "", 0
+    try:
+        doc = DocxDocument(io.BytesIO(file_bytes))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        text = "\n\n".join(paragraphs)
+        # Estimate pages
+        pages = max(1, len(text) // 3000)
+        return text, pages
+    except Exception:
+        return "", 0
+
+
+def extract_file_text(file_bytes: bytes, filename: str) -> Tuple[str, int]:
+    """Route to appropriate extractor based on file extension."""
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if ext == "pdf":
+        return extract_pdf_text(file_bytes)
+    elif ext in ("txt", "md"):
+        return extract_text_file(file_bytes)
+    elif ext == "docx":
+        return extract_docx_text(file_bytes)
+    else:
         return "", 0
 
 
@@ -294,18 +338,23 @@ def sidebar():
         st.caption(f"Groq API: {'✅ set' if groq_ok else '⚠️ missing'}")
 
         # Knowledge base uploader
-        with st.expander("Knowledge Base (PDF)", expanded=False):
+        with st.expander("Knowledge Base", expanded=False):
             kb = st.session_state.get("kb")
-            uploaded = st.file_uploader("Upload a PDF", type=["pdf"], accept_multiple_files=False)
+            uploaded = st.file_uploader(
+                "Upload a document", 
+                type=["pdf", "txt", "md", "docx"], 
+                accept_multiple_files=False,
+                help="Supported: PDF, TXT, MD, DOCX"
+            )
             
             if st.button("Clear KB", use_container_width=True):
                 st.session_state["kb"] = None
 
             if uploaded:
-                with st.spinner("Extracting text from PDF…"):
-                    content, pages = extract_pdf_text(uploaded.read())
+                with st.spinner("Extracting text…"):
+                    content, pages = extract_file_text(uploaded.read(), uploaded.name)
                 if not content.strip():
-                    st.warning("Could not extract text from the PDF.")
+                    st.warning("Could not extract text from the file.")
                 else:
                     chunks = chunk_text(content)
                     st.session_state["kb"] = {

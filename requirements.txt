@@ -3,3 +3,4 @@ openai
 requests
 python-dotenv
 pypdf
+python-docx
