@@ -281,7 +281,7 @@ def sidebar():
             if st.button("Reset Conversation", use_container_width=True):
                 st.session_state["messages"] = []
         with col2:
-            if st.button("Load Example Prompt", use_container_width=True):
+            if st.button("Reset Prompt", use_container_width=True):
                 st.session_state["system_prompt"] = load_example_system_prompt()
 
         # API key / service status
@@ -297,16 +297,11 @@ def sidebar():
         with st.expander("Knowledge Base (PDF)", expanded=False):
             kb = st.session_state.get("kb")
             uploaded = st.file_uploader("Upload a PDF", type=["pdf"], accept_multiple_files=False)
-            c1, c2 = st.columns([1, 1])
-            with c1:
-                clear_kb = st.button("Clear KB", use_container_width=True)
-            with c2:
-                process_now = st.button("Process PDF", use_container_width=True)
-
-            if clear_kb:
+            
+            if st.button("Clear KB", use_container_width=True):
                 st.session_state["kb"] = None
 
-            if uploaded and (process_now or kb is None):
+            if uploaded:
                 with st.spinner("Extracting text from PDF…"):
                     content, pages = extract_pdf_text(uploaded.read())
                 if not content.strip():
