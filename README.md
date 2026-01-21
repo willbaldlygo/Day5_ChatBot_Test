@@ -1,14 +1,13 @@
 # Digital Peninsula: ChatBot Sandbox
 
-An interactive Streamlit app to prototype and test customer service chatbot prompts against two backends:
+A simple, lightweight RAG based ChatBot with an exposed system prompt. Designed to help my AI Bootcamp learners understand how their system prompts effect the behaviour of ChatBots built on smaller, local LLM models.
 
 - OpenAI Chat Completions (`gpt-3.5-turbo`)
-- Groq Chat Completions (Gemma 2: `gemma2-9b-it`)
+- Groq Chat Completions (Llama 3.1 8B: `llama-3.1-8b-instant`)
 
 The app provides a sidebar for model selection, a live-editable system prompt, reset and example buttons, chat history rendering, and a raw request viewer.
 
 ## Quick Start
-
 1) Create and activate a virtual environment
 
 ```bash
@@ -51,7 +50,7 @@ Open the URL shown in the terminal (usually http://localhost:8501).
 ## Features
 
 - Sidebar controls:
-  - Model selector: `Groq: gemma2-9b-it` (default) or `OpenAI: gpt-3.5-turbo`
+  - Model selector: `Groq: llama-3.1-8b-instant` (default) or `OpenAI: gpt-3.5-turbo`
   - Editable System Prompt text area
   - Reset Conversation (clears history, keeps system prompt)
   - Load Example Prompt (friendly, professional helper template). The example prompt is pre-filled by default on first launch; you can edit or clear it anytime.
@@ -59,7 +58,7 @@ Open the URL shown in the terminal (usually http://localhost:8501).
   - Chat history rendered using `st.chat_message`
   - `st.chat_input` for live input
   - "Show raw request" expander displaying the exact payload (OpenAI or Groq)
-  - Knowledge Base: Upload a PDF in the sidebar under "Knowledge Base (PDF)". The app extracts text, chunks it, and retrieves top matching excerpts for each question, augmenting the system prompt. Use "Clear KB" to remove it.
+  - Knowledge Base: Upload a document (PDF, TXT, MD, DOCX) in the sidebar. The app extracts text, chunks it, and retrieves top matching excerpts for each question, augmenting the system prompt. Use "Clear KB" to remove it.
 
 ## Pushing to GitHub
 
